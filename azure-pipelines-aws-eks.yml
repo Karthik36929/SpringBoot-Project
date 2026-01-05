@@ -3,7 +3,7 @@
 
 trigger:
   branches:
-    include:
+    include: 
       - main
       - develop
 
@@ -254,18 +254,33 @@ stages:
         AWS_DEFAULT_REGION: $(AWS_REGION)
       displayName: 'Deploy to Kubernetes'
     
-    # Wait for deployment rollout
+    # Wait for deployment rollout with diagnostics
     - task: Bash@3
       inputs:
         targetType: 'inline'
         script: |
           echo "Waiting for deployment to complete..."
-          kubectl rollout status deployment/greeting-api-deployment -n $(K8S_NAMESPACE) --timeout=5m
+          kubectl rollout status deployment/greeting-api-deployment -n $(K8S_NAMESPACE) --timeout=10m || {
+            echo "Deployment timeout! Checking pod status..."
+            echo "=== Pod Status ==="
+            kubectl get pods -n $(K8S_NAMESPACE) -l app=greeting-api
+            echo ""
+            echo "=== Pod Descriptions ==="
+            kubectl describe pods -n $(K8S_NAMESPACE) -l app=greeting-api
+            echo ""
+            echo "=== Pod Logs ==="
+            for pod in $(kubectl get pods -n $(K8S_NAMESPACE) -l app=greeting-api -o jsonpath='{.items[*].metadata.name}'); do
+              echo "Logs for $pod:"
+              kubectl logs $pod -n $(K8S_NAMESPACE) --tail=50 || echo "No logs available"
+              echo "---"
+            done
+            exit 1
+          }
       env:
         AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
         AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
         AWS_DEFAULT_REGION: $(AWS_REGION)
-      displayName: 'Wait for Deployment'
+      displayName: 'Wait for Deployment with Diagnostics'
     
     # Display deployment information
     - task: Bash@3
