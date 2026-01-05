@@ -32,19 +32,22 @@ class GreetingControllerTest {
   @Test
   void testGreetByName() throws Exception {
     // Test GET /greet/{name}
-    mockMvc.perform(get("/api/greet/", "TestValue")
+    mockMvc.perform(get("/api/greet/{name}", "TestValue")
             .contentType(MediaType.APPLICATION_JSON))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.message").exists());
+            .andExpect(jsonPath("$.message").value("Hello, TestValue!"));
   }
 
   @Test
   void testCustomGreet() throws Exception {
-    // Test GET /greet/custom
+    // Test GET /greet/custom with query parameters
     mockMvc.perform(get("/api/greet/custom")
+            .param("name", "Alice")
+            .param("language", "spanish")
             .contentType(MediaType.APPLICATION_JSON))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.message").exists());
+            .andExpect(jsonPath("$.message").value("Hola, Alice!"))
+            .andExpect(jsonPath("$.language").value("spanish"));
   }
 
   @Test
