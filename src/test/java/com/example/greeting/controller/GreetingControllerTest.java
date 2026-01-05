@@ -53,11 +53,12 @@ class GreetingControllerTest {
   @Test
   void testCreateGreeting() throws Exception {
     // Test POST /greet
-    String requestBody = "{\"name\":\"TestName\",\"language\":\"english\"}";
+    String requestBody = "{\"name\":\"TestName\",\"message\":\"Hello\"}";
     mockMvc.perform(post("/api/greet")
             .contentType(MediaType.APPLICATION_JSON)
             .content(requestBody))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.message").exists());
+            .andExpect(jsonPath("$.greeting").exists())
+            .andExpect(jsonPath("$.status").value("success"));
   }
 }
