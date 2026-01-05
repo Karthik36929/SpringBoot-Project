@@ -217,8 +217,15 @@ stages:
       displayName: 'Configure kubectl for EKS'
     
     # Create namespace if not exists
-    - script: |
-        kubectl create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          kubectl create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
       displayName: 'Create Kubernetes Namespace'
     
     # Update image tags in k8s manifests
@@ -229,36 +236,57 @@ stages:
       displayName: 'Update K8s Manifests'
     
     # Apply Kubernetes manifests
-    - script: |
-        echo "Applying Kubernetes manifests..."
-        kubectl apply -f k8s/namespace.yaml || echo "Namespace already exists"
-        kubectl apply -f k8s/configmap.yaml -n $(K8S_NAMESPACE)
-        kubectl apply -f k8s/deployment.yaml -n $(K8S_NAMESPACE)
-        kubectl apply -f k8s/service.yaml -n $(K8S_NAMESPACE)
-        kubectl apply -f k8s/ingress.yaml -n $(K8S_NAMESPACE) || echo "Ingress optional"
-        kubectl apply -f k8s/hpa.yaml -n $(K8S_NAMESPACE) || echo "HPA optional"
-        echo "Kubernetes manifests applied successfully"
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "Applying Kubernetes manifests..."
+          kubectl apply -f k8s/namespace.yaml || echo "Namespace already exists"
+          kubectl apply -f k8s/configmap.yaml -n $(K8S_NAMESPACE)
+          kubectl apply -f k8s/deployment.yaml -n $(K8S_NAMESPACE)
+          kubectl apply -f k8s/service.yaml -n $(K8S_NAMESPACE)
+          kubectl apply -f k8s/ingress.yaml -n $(K8S_NAMESPACE) || echo "Ingress optional"
+          kubectl apply -f k8s/hpa.yaml -n $(K8S_NAMESPACE) || echo "HPA optional"
+          echo "Kubernetes manifests applied successfully"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
       displayName: 'Deploy to Kubernetes'
     
     # Wait for deployment rollout
-    - script: |
-        echo "Waiting for deployment to complete..."
-        kubectl rollout status deployment/greeting-api-deployment -n $(K8S_NAMESPACE) --timeout=5m
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "Waiting for deployment to complete..."
+          kubectl rollout status deployment/greeting-api-deployment -n $(K8S_NAMESPACE) --timeout=5m
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
       displayName: 'Wait for Deployment'
     
     # Display deployment information
-    - script: |
-        echo "===== Deployment Status ====="
-        kubectl get deployments -n $(K8S_NAMESPACE)
-        echo ""
-        echo "===== Pods ====="
-        kubectl get pods -n $(K8S_NAMESPACE) -l app=greeting-api
-        echo ""
-        echo "===== Services ====="
-        kubectl get services -n $(K8S_NAMESPACE)
-        echo ""
-        echo "===== Ingress ====="
-        kubectl get ingress -n $(K8S_NAMESPACE) || echo "No ingress configured"
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "===== Deployment Status ====="
+          kubectl get deployments -n $(K8S_NAMESPACE)
+          echo ""
+          echo "===== Pods ====="
+          kubectl get pods -n $(K8S_NAMESPACE) -l app=greeting-api
+          echo ""
+          echo "===== Services ====="
+          kubectl get services -n $(K8S_NAMESPACE)
+          echo ""
+          echo "===== Ingress ====="
+          kubectl get ingress -n $(K8S_NAMESPACE) || echo "No ingress configured"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
       displayName: 'Display Deployment Info'
     
     # Run smoke tests (optional)
