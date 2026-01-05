@@ -19,7 +19,7 @@ variables:
   
   # AWS Configuration (Set these in Azure DevOps Pipeline Variables or Variable Groups)
   - name: AWS_REGION
-    value: 'eu-north-1'
+    value: 'us-east-1'
   - name: AWS_ACCOUNT_ID
     value: '$(awsAccountId)'  # Set in pipeline variables
   - name: ECR_REPOSITORY
@@ -109,9 +109,172 @@ stages:
         publishLocation: 'pipeline'
       displayName: 'Publish JAR Artifact'
 
+- stage: Infrastructure
+  displayName: 'Setup AWS Infrastructure'
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - job: InfrastructureJob
+    displayName: 'Setup VPC Endpoints for ECR'
+    steps:
+    # Install AWS CLI
+    - script: |
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        unzip awscliv2.zip
+        sudo ./aws/install --update
+        aws --version
+      displayName: 'Install AWS CLI'
+    
+    # Setup VPC Endpoints for ECR (fixes ImagePullBackOff issues)
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          set -e
+          
+          echo "======================================================"
+          echo "Setting up VPC Endpoints for ECR Access"
+          echo "======================================================"
+          echo ""
+          
+          # Get VPC ID from EKS cluster
+          echo "1. Getting VPC information from EKS cluster..."
+          VPC_ID=$(aws eks describe-cluster \
+            --name $(EKS_CLUSTER_NAME) \
+            --region $(AWS_REGION) \
+            --query 'cluster.resourcesVpcConfig.vpcId' \
+            --output text)
+          
+          echo "   VPC ID: $VPC_ID"
+          
+          # Get subnet IDs
+          echo ""
+          echo "2. Getting subnet information..."
+          SUBNET_IDS=$(aws eks describe-cluster \
+            --name $(EKS_CLUSTER_NAME) \
+            --region $(AWS_REGION) \
+            --query 'cluster.resourcesVpcConfig.subnetIds' \
+            --output text)
+          
+          SUBNET_ARRAY=($SUBNET_IDS)
+          echo "   Subnets: ${SUBNET_ARRAY[@]}"
+          
+          # Get security group
+          echo ""
+          echo "3. Getting security group..."
+          SG_ID=$(aws eks describe-cluster \
+            --name $(EKS_CLUSTER_NAME) \
+            --region $(AWS_REGION) \
+            --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' \
+            --output text)
+          
+          echo "   Security Group: $SG_ID"
+          
+          # Function to check if endpoint exists
+          check_endpoint() {
+            local service_name=$1
+            aws ec2 describe-vpc-endpoints \
+              --region $(AWS_REGION) \
+              --filters "Name=vpc-id,Values=$VPC_ID" "Name=service-name,Values=$service_name" \
+              --query 'VpcEndpoints[0].VpcEndpointId' \
+              --output text 2>/dev/null
+          }
+          
+          # Create ECR API endpoint
+          echo ""
+          echo "4. Setting up ECR API endpoint..."
+          ECR_API_SERVICE="com.amazonaws.$(AWS_REGION).ecr.api"
+          EXISTING_ENDPOINT=$(check_endpoint $ECR_API_SERVICE)
+          
+          if [ "$EXISTING_ENDPOINT" != "None" ] && [ -n "$EXISTING_ENDPOINT" ]; then
+            echo "   ✅ ECR API endpoint already exists: $EXISTING_ENDPOINT"
+          else
+            echo "   Creating ECR API endpoint..."
+            aws ec2 create-vpc-endpoint \
+              --vpc-id $VPC_ID \
+              --vpc-endpoint-type Interface \
+              --service-name $ECR_API_SERVICE \
+              --subnet-ids ${SUBNET_ARRAY[@]} \
+              --security-group-ids $SG_ID \
+              --region $(AWS_REGION) \
+              --tag-specifications 'ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=eks-ecr-api},{Key=ManagedBy,Value=AzureDevOps}]' \
+              --query 'VpcEndpoint.VpcEndpointId' \
+              --output text
+            echo "   ✅ ECR API endpoint created successfully"
+          fi
+          
+          # Create ECR Docker endpoint
+          echo ""
+          echo "5. Setting up ECR Docker endpoint..."
+          ECR_DKR_SERVICE="com.amazonaws.$(AWS_REGION).ecr.dkr"
+          EXISTING_ENDPOINT=$(check_endpoint $ECR_DKR_SERVICE)
+          
+          if [ "$EXISTING_ENDPOINT" != "None" ] && [ -n "$EXISTING_ENDPOINT" ]; then
+            echo "   ✅ ECR Docker endpoint already exists: $EXISTING_ENDPOINT"
+          else
+            echo "   Creating ECR Docker endpoint..."
+            aws ec2 create-vpc-endpoint \
+              --vpc-id $VPC_ID \
+              --vpc-endpoint-type Interface \
+              --service-name $ECR_DKR_SERVICE \
+              --subnet-ids ${SUBNET_ARRAY[@]} \
+              --security-group-ids $SG_ID \
+              --region $(AWS_REGION) \
+              --tag-specifications 'ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=eks-ecr-dkr},{Key=ManagedBy,Value=AzureDevOps}]' \
+              --query 'VpcEndpoint.VpcEndpointId' \
+              --output text
+            echo "   ✅ ECR Docker endpoint created successfully"
+          fi
+          
+          # Create S3 Gateway endpoint
+          echo ""
+          echo "6. Setting up S3 Gateway endpoint..."
+          S3_SERVICE="com.amazonaws.$(AWS_REGION).s3"
+          EXISTING_ENDPOINT=$(check_endpoint $S3_SERVICE)
+          
+          if [ "$EXISTING_ENDPOINT" != "None" ] && [ -n "$EXISTING_ENDPOINT" ]; then
+            echo "   ✅ S3 Gateway endpoint already exists: $EXISTING_ENDPOINT"
+          else
+            echo "   Getting route tables..."
+            ROUTE_TABLE_IDS=$(aws ec2 describe-route-tables \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'RouteTables[].RouteTableId' \
+              --output text \
+              --region $(AWS_REGION))
+            
+            echo "   Creating S3 Gateway endpoint..."
+            aws ec2 create-vpc-endpoint \
+              --vpc-id $VPC_ID \
+              --vpc-endpoint-type Gateway \
+              --service-name $S3_SERVICE \
+              --route-table-ids $ROUTE_TABLE_IDS \
+              --region $(AWS_REGION) \
+              --tag-specifications 'ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=eks-s3-gateway},{Key=ManagedBy,Value=AzureDevOps}]' \
+              --query 'VpcEndpoint.VpcEndpointId' \
+              --output text
+            echo "   ✅ S3 Gateway endpoint created successfully"
+          fi
+          
+          echo ""
+          echo "======================================================"
+          echo "✅ Infrastructure setup complete!"
+          echo "======================================================"
+          echo ""
+          echo "VPC Endpoints allow EKS pods to access ECR without"
+          echo "needing a NAT Gateway or public internet access."
+          echo ""
+          echo "Cost: ~$7-10/month per interface endpoint"
+          echo "Total: ~$21-30/month for all 3 endpoints"
+          echo ""
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+      displayName: 'Create VPC Endpoints for ECR'
+
 - stage: Docker
   displayName: 'Build & Push Docker Image'
-  dependsOn: Build
+  dependsOn: Infrastructure
   condition: succeeded()
   jobs:
   - job: DockerJob
@@ -322,3 +485,4 @@ stages:
         curl -f http://$SERVICE_IP/actuator/health || echo "Health check failed (service might not be ready yet)"
       displayName: 'Run Smoke Tests'
       continueOnError: true
+
