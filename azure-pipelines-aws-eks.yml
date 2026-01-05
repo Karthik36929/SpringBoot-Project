@@ -19,7 +19,7 @@ variables:
   
   # AWS Configuration (Set these in Azure DevOps Pipeline Variables or Variable Groups)
   - name: AWS_REGION
-    value: 'us-east-1'
+    value: 'eu-north-1'
   - name: AWS_ACCOUNT_ID
     value: '$(awsAccountId)'  # Set in pipeline variables
   - name: ECR_REPOSITORY
